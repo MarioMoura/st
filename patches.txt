@@ -1,3 +1,4 @@
 https://st.suckless.org/patches/clipboard/st-clipboard-0.8.3.diff
 https://st.suckless.org/patches/scrollback/st-scrollback-0.9.2.diff
 https://st.suckless.org/patches/clickurl-nocontrol/st-clickurl-nocontrol-0.9.2.diff
+https://st.suckless.org/patches/scrollback/st-scrollback-mouse-0.9.2.diff

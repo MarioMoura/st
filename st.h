@@ -112,8 +112,7 @@ void selextend(int, int, int, int);
 int selected(int, int);
 char *getsel(void);
 
-void highlighturlsline(int);
-void unhighlighturlsline(int);
+void highlighturls(int);
 int followurl(int, int);
 
 size_t utf8encode(Rune, char *);

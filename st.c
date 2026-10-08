@@ -654,79 +654,92 @@ strstrany(char* s, char** strs) {
 	return NULL;
 }
 
-void
-highlighturlsline(int row)
+/* ascii text of the logical (soft-wrapped) line containing row */
+char *
+urlline(int row, int *ys, int *n)
 {
-	char *linestr = calloc(sizeof(char), term.col+1); /* assume ascii */
+	int ye = row, i;
+	Rune u;
+	char *s;
+
+	*ys = row;
+	while (*ys > 0 && TLINE(*ys-1)[term.col-1].mode & ATTR_WRAP)
+		(*ys)--;
+	while (ye < term.row-1 && TLINE(ye)[term.col-1].mode & ATTR_WRAP)
+		ye++;
+	*n = (ye - *ys + 1) * term.col;
+	s = xmalloc(*n + 1);
+	for (i = 0; i < *n; i++) {
+		u = TLINE(*ys + i/term.col)[i%term.col].u;
+		s[i] = (u > 0 && u < 127) ? u : ' ';
+	}
+	s[*n] = '\0';
+	return s;
+}
+
+/* find next url at or after p; returns its start and sets *end */
+char *
+nexturl(char *s, char *p, int n, int *end)
+{
 	char *match;
-	for (int j = 0; j < term.col; j++) {
-		if (term.line[row][j].u < 127) {
-			linestr[j] = term.line[row][j].u;
-		}
-		linestr[term.col] = '\0';
-	}
-	int url_start = -1;
-	while ((match = strstrany(linestr + url_start + 1, urlprefixes))) {
-		url_start = match - linestr;
-		for (int c = url_start; c < term.col && strchr(urlchars, linestr[c]); c++) {
-			term.line[row][c].mode |= ATTR_URL;
-			tsetdirt(row, c);
-		}
-	}
-	free(linestr);
+
+	if (!(match = strstrany(p, urlprefixes)))
+		return NULL;
+	for (*end = match - s; *end < n && strchr(urlchars, s[*end]); (*end)++)
+		;
+	return match;
 }
 
 void
-unhighlighturlsline(int row)
+highlighturls(int row)
 {
-	for (int j = 0; j < term.col; j++) {
-		Glyph* g = &term.line[row][j];
-		if (g->mode & ATTR_URL) {
-			g->mode &= ~ATTR_URL;
-			tsetdirt(row, j);
+	int ys, n, i, end = 0;
+	char *s, *m, *match;
+	Glyph *g;
+
+	s = urlline(row, &ys, &n);
+	m = xmalloc(n);
+	memset(m, 0, n);
+	while ((match = nexturl(s, s + end, n, &end)))
+		memset(m + (match - s), 1, end - (match - s));
+	for (i = 0; i < n; i++) {
+		g = &TLINE(ys + i/term.col)[i%term.col];
+		if (!!(g->mode & ATTR_URL) != m[i]) {
+			g->mode ^= ATTR_URL;
+			term.dirty[ys + i/term.col] = 1;
 		}
 	}
-	return;
+	free(m);
+	free(s);
 }
 
 int
 followurl(int col, int row) {
-	char *linestr = calloc(sizeof(char), term.col+1); /* assume ascii */
-	char *match;
-	for (int i = 0; i < term.col; i++) {
-		if (term.line[row][i].u < 127) {
-			linestr[i] = term.line[row][i].u;
-		}
-		linestr[term.col] = '\0';
-	}
-	int url_start = -1, found_url = 0;
-	while ((match = strstrany(linestr + url_start + 1, urlprefixes))) {
-		url_start = match - linestr;
-		int url_end = url_start;
-		for (int c = url_start; c < term.col && strchr(urlchars, linestr[c]); c++) {
-			url_end++;
-		}
-		if (url_start <= col && col < url_end) {
-			found_url = 1;
-			linestr[url_end] = '\0';
+	int ys, n, pos, end = 0;
+	char *s, *match;
+	pid_t chpid;
+
+	s = urlline(row, &ys, &n);
+	pos = (row - ys) * term.col + col;
+	while ((match = nexturl(s, s + end, n, &end))) {
+		if (match - s <= pos && pos < end)
 			break;
-		}
 	}
-	if (!found_url) {
-		free(linestr);
+	if (!match) {
+		free(s);
 		return 0;
 	}
+	s[end] = '\0';
 
-	pid_t chpid;
 	if ((chpid = fork()) == 0) {
 		if (fork() == 0)
-			execlp(urlhandler, urlhandler, linestr + url_start, NULL);
+			execlp(urlhandler, urlhandler, match, NULL);
 		exit(1);
 	}
 	if (chpid > 0)
 		waitpid(chpid, NULL, 0);
-	free(linestr);
-    return 1;
+	free(s);
+	return 1;
 }
 
 void
@@ -2788,13 +2801,15 @@ drawregion(int x1, int y1, int x2, int y2)
 {
 	int y;
 
+	for (y = y1; y < y2; y++)
+		if (term.dirty[y])
+			highlighturls(y);
+
 	for (y = y1; y < y2; y++) {
 		if (!term.dirty[y])
 			continue;
 
 		term.dirty[y] = 0;
-		unhighlighturlsline(y);
-		highlighturlsline(y);
 		xdrawline(TLINE(y), x1, y, x2);
 	}
 }
